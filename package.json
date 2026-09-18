@@ -1,0 +1,32 @@
+{
+  "name": "ask-jev",
+  "private": true,
+  "version": "0.2.0",
+  "type": "module",
+  "scripts": {
+    "build": "tsc -b && npm run build:options && npm run build:background && npm run build:content && npm run build:pdf-worker",
+    "build:options": "vite build --config vite.config.ts",
+    "build:background": "vite build --config vite.background.config.ts",
+    "build:content": "vite build --config vite.content.config.ts",
+    "build:pdf-worker": "node scripts/copy-pdf-worker.mjs",
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "verify:build": "node scripts/verify-build.mjs"
+  },
+  "dependencies": {
+    "pdfjs-dist": "^6.3.289",
+    "react": "latest",
+    "react-dom": "latest"
+  },
+  "devDependencies": {
+    "@types/chrome": "latest",
+    "@types/node": "^26.6.1",
+    "@types/react": "latest",
+    "@types/react-dom": "latest",
+    "@vitejs/plugin-react": "latest",
+    "jsdom": "^29.1.1",
+    "typescript": "latest",
+    "vite": "latest",
+    "vitest": "latest"
+  }
+}
