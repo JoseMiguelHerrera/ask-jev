@@ -19,7 +19,24 @@ export function OptionsApp() {
   const [documentStatus, setDocumentStatus] = useState("");
   const [parsingDocuments, setParsingDocuments] = useState(false);
   const [shortcut, setShortcut] = useState<string | null>(null);
+  const [shortcutsLinkCopied, setShortcutsLinkCopied] = useState(false);
   const documentInputRef = useRef<HTMLInputElement>(null);
+
+  const copyShortcutsLink = async () => {
+    try {
+      await navigator.clipboard.writeText("chrome://extensions/shortcuts");
+      setShortcutsLinkCopied(true);
+      setTimeout(() => setShortcutsLinkCopied(false), 2500);
+    } catch {
+      setShortcutsLinkCopied(false);
+    }
+  };
+
+  const shortcutsLink = (
+    <button type="button" className="shortcuts-link" onClick={() => void copyShortcutsLink()}>
+      chrome://extensions/shortcuts
+    </button>
+  );
 
   useEffect(() => {
     void chrome.storage.local.get(["apiKey", "endpoint", "model"]).then((stored) => {
@@ -232,9 +249,12 @@ export function OptionsApp() {
         {shortcut === "" && (
           <p className="shortcut-warning" role="status">
             Chrome did not assign the keyboard shortcut automatically. Open{" "}
-            <code>chrome://extensions/shortcuts</code> and set one for{" "}
+            {shortcutsLink} and set one for{" "}
             <strong>Open Ask Jev on the current page</strong> — the toolbar icon
             works in the meantime.
+            {shortcutsLinkCopied && (
+              <span className="copied-note"> Copied — paste it into a new tab.</span>
+            )}
           </p>
         )}
 
@@ -248,7 +268,10 @@ export function OptionsApp() {
               Open Ask Jev with the toolbar icon until a shortcut is assigned.
             </>
           )}{" "}
-          Shortcut conflicts can be changed in <code>chrome://extensions/shortcuts</code>.
+          Shortcut conflicts can be changed in {shortcutsLink}.
+          {shortcutsLinkCopied && shortcut !== "" && (
+            <span className="copied-note"> Copied — paste it into a new tab.</span>
+          )}
         </footer>
       </section>
     </main>
