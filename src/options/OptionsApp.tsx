@@ -18,6 +18,7 @@ export function OptionsApp() {
   const [documents, setDocuments] = useState<ReferenceDocumentMetadata[]>([]);
   const [documentStatus, setDocumentStatus] = useState("");
   const [parsingDocuments, setParsingDocuments] = useState(false);
+  const [shortcut, setShortcut] = useState<string | null>(null);
   const documentInputRef = useRef<HTMLInputElement>(null);
 
   useEffect(() => {
@@ -30,6 +31,10 @@ export function OptionsApp() {
     void loadReferenceDocuments().then((stored) =>
       setDocuments(toReferenceMetadata(stored)),
     );
+    void chrome.commands.getAll().then((commands) => {
+      const toggle = commands.find((command) => command.name === "toggle-ask-jev");
+      setShortcut(toggle?.shortcut ?? "");
+    });
   }, []);
 
   const addDocuments = async (files: File[]) => {
@@ -218,8 +223,25 @@ export function OptionsApp() {
           </p>
         </section>
 
+        {shortcut === "" && (
+          <p className="shortcut-warning" role="status">
+            Chrome did not assign the keyboard shortcut automatically. Open{" "}
+            <code>chrome://extensions/shortcuts</code> and set one for{" "}
+            <strong>Open Ask Jev on the current page</strong> — the toolbar icon
+            works in the meantime.
+          </p>
+        )}
+
         <footer>
-          Open Ask Jev with <kbd>⌘</kbd><kbd>J</kbd> on macOS.
+          {shortcut ? (
+            <>
+              Open Ask Jev with <kbd>{shortcut}</kbd>.
+            </>
+          ) : (
+            <>
+              Open Ask Jev with the toolbar icon until a shortcut is assigned.
+            </>
+          )}{" "}
           Shortcut conflicts can be changed in <code>chrome://extensions/shortcuts</code>.
         </footer>
       </section>
