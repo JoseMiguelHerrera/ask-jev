@@ -31,10 +31,16 @@ export function OptionsApp() {
     void loadReferenceDocuments().then((stored) =>
       setDocuments(toReferenceMetadata(stored)),
     );
-    void chrome.commands.getAll().then((commands) => {
-      const toggle = commands.find((command) => command.name === "toggle-ask-jev");
-      setShortcut(toggle?.shortcut ?? "");
-    });
+
+    const refreshShortcut = () => {
+      void chrome.commands.getAll().then((commands) => {
+        const toggle = commands.find((command) => command.name === "toggle-ask-jev");
+        setShortcut(toggle?.shortcut ?? "");
+      });
+    };
+    refreshShortcut();
+    window.addEventListener("focus", refreshShortcut);
+    return () => window.removeEventListener("focus", refreshShortcut);
   }, []);
 
   const addDocuments = async (files: File[]) => {
