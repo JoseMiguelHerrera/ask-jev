@@ -481,6 +481,45 @@ form {
   color: #4f5360;
 }
 
+.ajev-quota {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 12px;
+  margin-top: 16px;
+  padding: 11px 12px;
+  border: 1px solid rgba(196, 176, 122, 0.32);
+  border-radius: 9px;
+  background: rgba(196, 176, 122, 0.08);
+  color: #e6d7b0;
+  font-size: 12px;
+  line-height: 1.45;
+}
+
+.ajev-quota strong {
+  display: block;
+  margin-bottom: 3px;
+  color: #f3e6c4;
+  font-size: 12px;
+  font-weight: 650;
+}
+
+.ajev-quota span {
+  display: block;
+}
+
+.ajev-quota button {
+  flex: none;
+  border: 0;
+  background: transparent;
+  color: #f3e6c4;
+  cursor: pointer;
+  font-size: 11px;
+  font-weight: 650;
+  text-decoration: underline;
+  text-underline-offset: 2px;
+}
+
 .ajev-error {
   display: flex;
   align-items: flex-start;

@@ -5,7 +5,8 @@ import {
   MAX_EXTRACTED_DOCUMENT_BYTES,
   type ParsedDocument,
 } from "./documents";
-import type { AskErrorSource, JevChoiceResult, JevErrorCode } from "./jev";
+import type { AskErrorSource, JevChoiceResult, JevErrorCode, QuotaDetails } from "./jev";
+import type { QuotaSnapshot } from "./quota-status";
 import { MAX_CHOICE_LENGTH, MAX_CHOICES, MAX_QUESTION_LENGTH } from "./choices";
 import { MAX_CONTEXT_BYTES, MAX_CONTEXT_CHARS } from "./limits";
 
@@ -25,6 +26,7 @@ export interface AskSubmissionPayload {
 
 export interface AskJevMessage {
   type: "ASK_JEV_REQUEST";
+  requestId?: string;
   payload: AskSubmissionPayload;
 }
 
@@ -34,7 +36,16 @@ export interface GetReferenceDocumentsMessage {
 
 export interface OpenOptionsMessage {
   type: "ASK_JEV_OPEN_OPTIONS";
+  intent?: "apiKey";
 }
+
+export interface QuotaStatusMessage {
+  type: "ASK_JEV_QUOTA";
+}
+
+export type QuotaStatusResponse =
+  | { ok: true; quota: QuotaSnapshot }
+  | { ok: false; error: string };
 
 export interface AddReferenceDocumentMessage {
   type: "ASK_JEV_ADD_REFERENCE_DOCUMENT";
@@ -51,12 +62,14 @@ export type AskJevResponse =
       ok: true;
       result: JevChoiceResult;
       latencyMs: number;
+      remaining?: number;
     }
   | {
       ok: false;
       code: JevErrorCode;
       source: AskErrorSource;
       error: string;
+      quota?: QuotaDetails;
     };
 
 export type ReferenceDocumentsResponse =
@@ -124,6 +137,12 @@ export function isAskJevMessage(value: unknown): value is AskJevMessage {
   if (typeof value !== "object" || value === null) return false;
   const message = value as Record<string, unknown>;
   if (message.type !== "ASK_JEV_REQUEST") return false;
+  if (
+    message.requestId !== undefined &&
+    (typeof message.requestId !== "string" || message.requestId.length === 0 || message.requestId.length > 80)
+  ) {
+    return false;
+  }
   if (typeof message.payload !== "object" || message.payload === null) return false;
   const payload = message.payload as Record<string, unknown>;
   return (
@@ -158,17 +177,29 @@ export function isGetReferenceDocumentsMessage(
   );
 }
 
+export function isQuotaStatusMessage(value: unknown): value is QuotaStatusMessage {
+  return typeof value === "object" && value !== null && (value as Record<string, unknown>).type === "ASK_JEV_QUOTA";
+}
+
 export function isOpenOptionsMessage(value: unknown): value is OpenOptionsMessage {
-  return (
-    typeof value === "object" &&
-    value !== null &&
-    (value as Record<string, unknown>).type === "ASK_JEV_OPEN_OPTIONS"
-  );
+  if (typeof value !== "object" || value === null) return false;
+  const message = value as Record<string, unknown>;
+  if (message.type !== "ASK_JEV_OPEN_OPTIONS") return false;
+  return message.intent === undefined || message.intent === "apiKey";
 }
 
 export function openAskJevSettings(
   send: (message: unknown) => Promise<unknown> = (message) =>
     chrome.runtime.sendMessage(message),
+  intent?: "apiKey",
 ): Promise<void> {
-  return send({ type: "ASK_JEV_OPEN_OPTIONS" }).then(() => undefined);
+  const message: OpenOptionsMessage = intent ? { type: "ASK_JEV_OPEN_OPTIONS", intent } : { type: "ASK_JEV_OPEN_OPTIONS" };
+  return send(message).then(() => undefined);
+}
+
+export function openAskJevApiKeySettings(
+  send: (message: unknown) => Promise<unknown> = (message) =>
+    chrome.runtime.sendMessage(message),
+): Promise<void> {
+  return openAskJevSettings(send, "apiKey");
 }

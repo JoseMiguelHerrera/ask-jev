@@ -73,6 +73,49 @@ h1 {
   line-height: 1.55;
 }
 
+.field-note {
+  margin: 0;
+  color: #9297a7;
+  font-size: 12px;
+  line-height: 1.5;
+}
+
+.quota-status {
+  margin-top: 8px;
+  color: #9297a7;
+  font-size: 13px;
+  line-height: 1.45;
+}
+
+.quota-status h2 {
+  margin: 0 0 8px;
+  color: var(--ajev-sage);
+  font-family: var(--ajev-mono);
+  font-size: 12px;
+  font-weight: 500;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+
+.quota-status ul {
+  display: grid;
+  gap: 6px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.quota-status li {
+  display: flex;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.quota-status strong {
+  color: #e8e6e3;
+  font-weight: 550;
+}
+
 form {
   display: grid;
   gap: 9px;

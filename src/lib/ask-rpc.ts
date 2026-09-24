@@ -14,7 +14,8 @@ export async function sendAskJevRequest(
 ): Promise<AskJevResponse> {
   await send({ type: "ASK_JEV_PING" }).catch(() => undefined);
 
-  const message = { type: "ASK_JEV_REQUEST", payload };
+  const requestId = crypto.randomUUID();
+  const message = { type: "ASK_JEV_REQUEST", requestId, payload };
   let lastError: unknown;
 
   for (let attempt = 0; attempt < 2; attempt += 1) {

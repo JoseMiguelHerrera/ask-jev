@@ -6,15 +6,19 @@ import {
   removeReferenceDocument,
   toReferenceMetadata,
 } from "../lib/document-store";
+import { loadInstallId } from "../lib/install-id";
 import { JevRequestError, requestJev } from "../lib/jev";
+import { proxyClientSecret, requestFreeJev, requestQuota } from "../lib/proxy";
 import {
   isAddReferenceDocumentMessage,
   isAskJevMessage,
   isGetReferenceDocumentsMessage,
   isOpenOptionsMessage,
+  isQuotaStatusMessage,
   isRemoveReferenceDocumentMessage,
   rejectionForAskJevMessage,
   type AskJevResponse,
+  type QuotaStatusResponse,
   type ReferenceDocumentsResponse,
 } from "../lib/messages";
 import { DEFAULT_SETTINGS, normalizeSettings } from "../lib/settings";
@@ -22,6 +26,20 @@ import { DEFAULT_SETTINGS, normalizeSettings } from "../lib/settings";
 void chrome.storage.local.setAccessLevel({ accessLevel: "TRUSTED_CONTEXTS" });
 
 let documentMutationQueue = Promise.resolve();
+const askAttempts = new Map<string, Promise<AskJevResponse>>();
+
+function askOnce(requestId: string | undefined, run: () => Promise<AskJevResponse>): Promise<AskJevResponse> {
+  if (!requestId) return run();
+  const current = askAttempts.get(requestId);
+  if (current) return current;
+  const pending = run();
+  askAttempts.set(requestId, pending);
+  const forget = () => {
+    if (askAttempts.get(requestId) === pending) askAttempts.delete(requestId);
+  };
+  setTimeout(forget, 30_000);
+  return pending;
+}
 
 function enqueueDocumentMutation<T>(operation: () => Promise<T>): Promise<T> {
   const result = documentMutationQueue.then(operation, operation);
@@ -87,7 +105,10 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
   }
 
   if (isOpenOptionsMessage(message)) {
-    void chrome.runtime.openOptionsPage();
+    const open = message.intent === "apiKey"
+      ? chrome.storage.local.set({ settingsIntent: "apiKey" }).then(() => chrome.runtime.openOptionsPage())
+      : chrome.runtime.openOptionsPage();
+    void open;
     sendResponse({ ok: true });
     return false;
   }
@@ -99,6 +120,26 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
   const trustedOptionsSender =
     sender.id === chrome.runtime.id &&
     sender.url === chrome.runtime.getURL("options.html");
+
+  if (isQuotaStatusMessage(message)) {
+    if (!trustedOptionsSender) {
+      sendResponse({ ok: false, error: "Free question counts are available from Settings." } satisfies QuotaStatusResponse);
+      return false;
+    }
+    void (async () => {
+      try {
+        const installId = await loadInstallId({
+          get: (key) => chrome.storage.local.get(key),
+          set: (items) => chrome.storage.local.set(items),
+        });
+        const quota = await requestQuota({ installId, secret: proxyClientSecret() });
+        sendResponse({ ok: true, quota } satisfies QuotaStatusResponse);
+      } catch {
+        sendResponse({ ok: false, error: "Free question counts could not be loaded." } satisfies QuotaStatusResponse);
+      }
+    })();
+    return true;
+  }
 
   if (
     isAddReferenceDocumentMessage(message) ||
@@ -164,7 +205,7 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
 
   if (!isAskJevMessage(message)) return false;
 
-  const respond = async (): Promise<AskJevResponse> => {
+  const respond = (): Promise<AskJevResponse> => askOnce(message.requestId, async () => {
     if (!trustedSender) {
       return { ok: false, code: "bad_request", source: "plugin", error: "This page is not supported." };
     }
@@ -209,22 +250,45 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
     const settings = normalizeSettings(stored);
     const startedAt = performance.now();
     try {
-      const result = await requestJev(
-        {
-          context,
-          question,
-          choices,
-        },
+      if (settings.apiKey) {
+        const result = await requestJev(
+          {
+            context,
+            question,
+            choices,
+          },
+          settings,
+        );
+        return {
+          ok: true,
+          result,
+          latencyMs: Math.round(performance.now() - startedAt),
+        };
+      }
+      const installId = await loadInstallId({
+        get: (key) => chrome.storage.local.get(key),
+        set: (items) => chrome.storage.local.set(items),
+      });
+      const free = await requestFreeJev(
+        { context, question, choices },
         settings,
+        { installId, secret: proxyClientSecret() },
       );
       return {
         ok: true,
-        result,
+        result: free.result,
         latencyMs: Math.round(performance.now() - startedAt),
+        ...(typeof free.remaining === "number" ? { remaining: free.remaining } : {}),
       };
     } catch (error) {
       if (error instanceof JevRequestError) {
-        return { ok: false, code: error.code, source: error.source, error: error.message };
+        return {
+          ok: false,
+          code: error.code,
+          source: error.source,
+          error: error.message,
+          ...(error.quota ? { quota: error.quota } : {}),
+        };
       }
       return {
         ok: false,
@@ -233,7 +297,7 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
         error: "Ask Jev ran into an unexpected error.",
       };
     }
-  };
+  });
 
   void respond()
     .then(sendResponse)

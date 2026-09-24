@@ -35,9 +35,11 @@ describe("sendAskJevRequest", () => {
     });
 
     await expect(sendAskJevRequest(payload, send)).resolves.toEqual(success);
-    expect(
-      send.mock.calls.filter((call) => (call[0] as { type?: string }).type === "ASK_JEV_REQUEST"),
-    ).toHaveLength(2);
+    const requests = send.mock.calls
+      .map((call) => call[0] as { type?: string; requestId?: string })
+      .filter((message) => message.type === "ASK_JEV_REQUEST");
+    expect(requests).toHaveLength(2);
+    expect(requests[0]?.requestId).toBe(requests[1]?.requestId);
   });
 
   it("surfaces a clear error after an empty response", async () => {

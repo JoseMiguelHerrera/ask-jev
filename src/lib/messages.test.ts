@@ -5,6 +5,7 @@ import {
   isAskJevRequestType,
   isOpenOptionsMessage,
   isRemoveReferenceDocumentMessage,
+  openAskJevApiKeySettings,
   openAskJevSettings,
   rejectionForAskJevMessage,
 } from "./messages";
@@ -23,6 +24,9 @@ const validMessage = {
 describe("isAskJevMessage", () => {
   it("accepts a bounded ask request", () => {
     expect(isAskJevMessage(validMessage)).toBe(true);
+    expect(isAskJevMessage({ ...validMessage, requestId: "attempt-1" })).toBe(true);
+    expect(isAskJevMessage({ ...validMessage, requestId: "" })).toBe(false);
+    expect(isAskJevMessage({ ...validMessage, requestId: "x".repeat(81) })).toBe(false);
   });
 
   it("rejects oversized untrusted context", () => {
@@ -59,6 +63,8 @@ describe("isAskJevMessage", () => {
 describe("isOpenOptionsMessage", () => {
   it("accepts the settings open request from the palette", () => {
     expect(isOpenOptionsMessage({ type: "ASK_JEV_OPEN_OPTIONS" })).toBe(true);
+    expect(isOpenOptionsMessage({ type: "ASK_JEV_OPEN_OPTIONS", intent: "apiKey" })).toBe(true);
+    expect(isOpenOptionsMessage({ type: "ASK_JEV_OPEN_OPTIONS", intent: "other" })).toBe(false);
     expect(isOpenOptionsMessage({ type: "ASK_JEV_PING" })).toBe(false);
   });
 
@@ -66,6 +72,8 @@ describe("isOpenOptionsMessage", () => {
     const send = vi.fn().mockResolvedValue({ ok: true });
     await openAskJevSettings(send);
     expect(send).toHaveBeenCalledWith({ type: "ASK_JEV_OPEN_OPTIONS" });
+    await openAskJevApiKeySettings(send);
+    expect(send).toHaveBeenCalledWith({ type: "ASK_JEV_OPEN_OPTIONS", intent: "apiKey" });
   });
 });
 

@@ -2,10 +2,13 @@
   "manifest_version": 3,
   "name": "Ask Jev",
   "description": "Ask fast probabilistic questions about the page you are viewing.",
-  "version": "0.2.1",
+  "version": "0.3.0",
   "minimum_chrome_version": "119",
   "permissions": ["activeTab", "scripting", "storage"],
-  "host_permissions": ["https://api.typesafe.ai/*"],
+  "host_permissions": [
+    "https://api.typesafe.ai/*",
+    "https://ask-jev-backend.vercel.app/*"
+  ],
   "icons": {
     "16": "icons/icon-16.png",
     "48": "icons/icon-48.png",
@@ -33,6 +36,13 @@
     }
   },
   "options_page": "options.html",
+  "content_scripts": [
+    {
+      "matches": ["http://*/*", "https://*/*"],
+      "js": ["assets/keyboard-guard.js"],
+      "run_at": "document_start"
+    }
+  ],
   "web_accessible_resources": [
     {
       "resources": ["assets/pdf.worker.min.mjs", "assets/cmaps/*"],
@@ -40,6 +50,6 @@
     }
   ],
   "content_security_policy": {
-    "extension_pages": "default-src 'self'; script-src 'self'; connect-src https://api.typesafe.ai; object-src 'none'; base-uri 'none'"
+    "extension_pages": "default-src 'self'; script-src 'self'; connect-src https://api.typesafe.ai https://ask-jev-backend.vercel.app; object-src 'none'; base-uri 'none'"
   }
 }

@@ -7,6 +7,9 @@ import {
 } from "../lib/document-store";
 import { parseDocumentFile } from "../lib/documents";
 import type { ReferenceDocumentsResponse } from "../lib/messages";
+import { burstSecondsLeft } from "../lib/ask-error";
+import type { QuotaStatusResponse } from "../lib/messages";
+import { formatReset, quotaRows, type QuotaSnapshot } from "../lib/quota-status";
 import { DEFAULT_SETTINGS, normalizeSettings } from "../lib/settings";
 
 export function OptionsApp() {
@@ -18,9 +21,15 @@ export function OptionsApp() {
   const [documents, setDocuments] = useState<ReferenceDocumentMetadata[]>([]);
   const [documentStatus, setDocumentStatus] = useState("");
   const [parsingDocuments, setParsingDocuments] = useState(false);
+  const [settingsLoaded, setSettingsLoaded] = useState(false);
+  const [quota, setQuota] = useState<QuotaSnapshot | null>(null);
+  const [quotaState, setQuotaState] = useState<"loading" | "ready" | "error">("loading");
+  const [now, setNow] = useState(() => Date.now());
+  const quotaReceivedAt = useRef(Date.now());
   const [shortcut, setShortcut] = useState<string | null>(null);
   const [shortcutsLinkCopied, setShortcutsLinkCopied] = useState(false);
   const documentInputRef = useRef<HTMLInputElement>(null);
+  const apiKeyRef = useRef<HTMLInputElement>(null);
 
   const copyShortcutsLink = async () => {
     try {
@@ -44,6 +53,7 @@ export function OptionsApp() {
       setApiKey(settings.apiKey);
       setEndpoint(settings.endpoint);
       setModel(settings.model);
+      setSettingsLoaded(true);
     });
     void loadReferenceDocuments().then((stored) =>
       setDocuments(toReferenceMetadata(stored)),
@@ -57,8 +67,69 @@ export function OptionsApp() {
     };
     refreshShortcut();
     window.addEventListener("focus", refreshShortcut);
-    return () => window.removeEventListener("focus", refreshShortcut);
+
+    const focusApiKey = () => {
+      const field = apiKeyRef.current;
+      if (!field) return;
+      field.focus();
+      field.scrollIntoView({ block: "center" });
+    };
+    const consumeApiKeyIntent = () => {
+      void chrome.storage.local.get("settingsIntent").then((stored) => {
+        if (stored.settingsIntent !== "apiKey") return;
+        focusApiKey();
+        void chrome.storage.local.remove("settingsIntent");
+      });
+    };
+    consumeApiKeyIntent();
+    const onStorageChanged = (changes: { [key: string]: chrome.storage.StorageChange }, area: string) => {
+      if (area === "local" && changes.settingsIntent?.newValue === "apiKey") consumeApiKeyIntent();
+    };
+    chrome.storage.onChanged.addListener(onStorageChanged);
+
+    return () => {
+      window.removeEventListener("focus", refreshShortcut);
+      chrome.storage.onChanged.removeListener(onStorageChanged);
+    };
   }, []);
+
+  const loadQuota = () => {
+    setQuota(null);
+    setQuotaState("loading");
+    void chrome.runtime.sendMessage({ type: "ASK_JEV_QUOTA" })
+      .then((response: QuotaStatusResponse) => {
+        if (!response?.ok) {
+          setQuotaState("error");
+          return;
+        }
+        quotaReceivedAt.current = Date.now();
+        setNow(Date.now());
+        setQuota(response.quota);
+        setQuotaState("ready");
+      })
+      .catch(() => setQuotaState("error"));
+  };
+
+  useEffect(() => {
+    if (!settingsLoaded || apiKey.trim()) return;
+    loadQuota();
+  }, [settingsLoaded, apiKey]);
+
+  useEffect(() => {
+    const retry = quota?.burst?.retryAfterSeconds;
+    if (quotaState !== "ready" || typeof retry !== "number") return;
+    const endsAt = quotaReceivedAt.current + retry * 1000;
+    if (Date.now() >= endsAt) return;
+    const timer = window.setInterval(() => {
+      const current = Date.now();
+      setNow(current);
+      if (current >= endsAt) {
+        window.clearInterval(timer);
+        loadQuota();
+      }
+    }, 250);
+    return () => window.clearInterval(timer);
+  }, [quota, quotaState]);
 
   const addDocuments = async (files: File[]) => {
     const available = MAX_REFERENCE_DOCUMENTS - documents.length;
@@ -94,17 +165,15 @@ export function OptionsApp() {
     event.preventDefault();
     setStatus("");
 
-    if (!apiKey.trim()) {
-      setStatus("Enter your TypeSafe API key.");
-      return;
-    }
-    if (endpoint.trim() !== DEFAULT_SETTINGS.endpoint) {
-      setStatus("Use the official TypeSafe System One endpoint.");
-      return;
-    }
-    if (!model.trim()) {
-      setStatus("Enter a Jev model identifier.");
-      return;
+    if (apiKey.trim()) {
+      if (endpoint.trim() !== DEFAULT_SETTINGS.endpoint) {
+        setStatus("Use the official TypeSafe System One endpoint.");
+        return;
+      }
+      if (!model.trim()) {
+        setStatus("Enter a Jev model identifier.");
+        return;
+      }
     }
 
     await chrome.storage.local.set(
@@ -122,18 +191,19 @@ export function OptionsApp() {
         </div>
         <h1>Connect to Jev</h1>
         <p className="intro">
-          Your key stays in this Chrome profile. Only the extension service worker sends it to TypeSafe.
+          Leave the key blank to use this install's free questions each UTC day. A saved key is unlimited and is sent only to TypeSafe.
         </p>
 
         <form onSubmit={save}>
           <label htmlFor="api-key">TypeSafe API key</label>
           <div className="key-field">
             <input
+              ref={apiKeyRef}
               id="api-key"
               type={showKey ? "text" : "password"}
               value={apiKey}
               onChange={(event) => setApiKey(event.target.value)}
-              placeholder="Paste TYPESAFE_API_KEY"
+              placeholder="Optional — blank uses free questions"
               spellCheck={false}
               autoComplete="off"
             />
@@ -141,24 +211,57 @@ export function OptionsApp() {
               {showKey ? "Hide" : "Show"}
             </button>
           </div>
+          <p className="field-note">
+            A blank key uses the free tier. A saved key is unlimited and goes only to TypeSafe.
+          </p>
+          {apiKey.trim() ? (
+            <p className="field-note">This key does not use the free caps.</p>
+          ) : (
+            <div className="quota-status">
+              <h2>Free questions</h2>
+              {quotaState === "loading" ? <p>Checking free questions…</p> : null}
+              {quotaState === "error" ? <p>Free question counts could not be loaded.</p> : null}
+              {quotaState === "ready" && quota ? (
+                <>
+                  <ul>
+                    {quotaRows(quota).map((row) => (
+                      <li key={row.id}>
+                        <span>{row.label}</span>
+                        <strong>
+                          {row.id === "burst" && typeof quota.burst?.retryAfterSeconds === "number"
+                            ? `${row.text}. Wait ${burstSecondsLeft(quota.burst.retryAfterSeconds, quotaReceivedAt.current, now)}s`
+                            : row.text}
+                        </strong>
+                      </li>
+                    ))}
+                  </ul>
+                  {formatReset(quota.resetsAt) ? <p>{formatReset(quota.resetsAt)}</p> : null}
+                </>
+              ) : null}
+            </div>
+          )}
 
-          <label htmlFor="endpoint">API endpoint</label>
-          <input
-            id="endpoint"
-            type="url"
-            value={endpoint}
-            onChange={(event) => setEndpoint(event.target.value)}
-            spellCheck={false}
-          />
+          {apiKey.trim() ? (
+            <>
+              <label htmlFor="endpoint">API endpoint</label>
+              <input
+                id="endpoint"
+                type="url"
+                value={endpoint}
+                onChange={(event) => setEndpoint(event.target.value)}
+                spellCheck={false}
+              />
 
-          <label htmlFor="model">Model</label>
-          <input
-            id="model"
-            value={model}
-            onChange={(event) => setModel(event.target.value)}
-            placeholder="jev-latest"
-            spellCheck={false}
-          />
+              <label htmlFor="model">Model</label>
+              <input
+                id="model"
+                value={model}
+                onChange={(event) => setModel(event.target.value)}
+                placeholder="jev-latest"
+                spellCheck={false}
+              />
+            </>
+          ) : null}
 
           <div className="actions">
             <span className={status === "Settings saved." ? "status success" : "status"}>

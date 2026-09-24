@@ -29,22 +29,37 @@ export type JevErrorCode =
   | "authentication"
   | "bad_request"
   | "rate_limit"
+  | "quota"
   | "overloaded"
   | "network"
   | "invalid_response"
   | "settings";
 
+export type QuotaLimitName = "burst" | "daily" | "network" | "global" | "unavailable";
+
+export interface QuotaDetails {
+  limit: QuotaLimitName;
+  remaining?: number;
+  retryAfterSeconds?: number;
+  allowance?: number;
+  burstLimit?: number;
+  burstWindowSeconds?: number;
+}
+
 export class JevRequestError extends Error {
   readonly source: AskErrorSource;
+  readonly quota?: QuotaDetails;
 
   constructor(
     public readonly code: JevErrorCode,
     message: string,
-    source: AskErrorSource = code === "settings" ? "plugin" : "jev",
+    source: AskErrorSource = code === "settings" || code === "quota" ? "plugin" : "jev",
+    quota?: QuotaDetails,
   ) {
     super(message);
     this.name = "JevRequestError";
     this.source = source;
+    this.quota = quota;
   }
 }
 

@@ -1,22 +1,23 @@
 import { StrictMode } from "react";
 import { createRoot, type Root } from "react-dom/client";
 import { AskJevPalette } from "../components/AskJevPalette";
+import { ASK_JEV_HOST_ID, installAskJevKeyboardGuard } from "./keyboard-guard";
 import paletteStyles from "./palette.css?inline";
 
-const HOST_ID = "ask-jev-extension-root";
+installAskJevKeyboardGuard();
 let root: Root | null = null;
 
 function closePalette(): void {
   root?.unmount();
   root = null;
-  document.getElementById(HOST_ID)?.remove();
+  document.getElementById(ASK_JEV_HOST_ID)?.remove();
 }
 
 function openPalette(): void {
   closePalette();
 
   const host = document.createElement("ask-jev-overlay");
-  host.id = HOST_ID;
+  host.id = ASK_JEV_HOST_ID;
   const shadow = host.attachShadow({ mode: "closed" });
   const style = document.createElement("style");
   style.textContent = paletteStyles;
@@ -38,7 +39,7 @@ chrome.runtime.onMessage.addListener((message: unknown) => {
     message !== null &&
     (message as { type?: unknown }).type === "ASK_JEV_TOGGLE"
   ) {
-    if (document.getElementById(HOST_ID)) closePalette();
+    if (document.getElementById(ASK_JEV_HOST_ID)) closePalette();
     else openPalette();
   }
 });

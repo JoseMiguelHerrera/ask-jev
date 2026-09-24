@@ -9,15 +9,23 @@ import {
 import { cleanChoices, MAX_CHOICES, validateAskInput } from "../lib/choices";
 import type { ReferenceDocumentMetadata } from "../lib/document-store";
 import { parseDocumentFile, type ParsedDocument } from "../lib/documents";
-import { presentAskError, type PresentedAskError } from "../lib/ask-error";
+import {
+  burstQuotaBody,
+  burstSecondsLeft,
+  presentAskError,
+  type PresentedAskError,
+  type QuotaPresentation,
+} from "../lib/ask-error";
 import { sendAskJevRequest } from "../lib/ask-rpc";
 import type { JevChoiceResult } from "../lib/jev";
 import {
   MAX_EPHEMERAL_DOCUMENTS,
+  openAskJevApiKeySettings,
   openAskJevSettings,
   type ReferenceDocumentsResponse,
 } from "../lib/messages";
 import { extractPageContext } from "../lib/page-context";
+import { askJevKeyHandlers, repairPreventedTextEdit } from "../content/keyboard-guard";
 
 interface AskJevPaletteProps {
   onClose: () => void;
@@ -26,9 +34,48 @@ interface AskJevPaletteProps {
 interface CompletedResult {
   judgment: JevChoiceResult;
   latencyMs: number;
+  remaining?: number;
 }
 
 const INITIAL_CHOICES = ["YES", "NO", "UNCLEAR"];
+
+function QuotaNotice({ quota }: { quota: QuotaPresentation }) {
+  const ticking = quota.limit === "burst" && typeof quota.retryAfterSeconds === "number" && typeof quota.receivedAt === "number";
+  const [now, setNow] = useState(() => Date.now());
+
+  useEffect(() => {
+    if (!ticking || quota.receivedAt == null || quota.retryAfterSeconds == null) return;
+    const endsAt = quota.receivedAt + quota.retryAfterSeconds * 1000;
+    if (Date.now() >= endsAt) return;
+    const timer = window.setInterval(() => {
+      const current = Date.now();
+      setNow(current);
+      if (current >= endsAt) window.clearInterval(timer);
+    }, 250);
+    return () => window.clearInterval(timer);
+  }, [ticking, quota.receivedAt, quota.retryAfterSeconds]);
+
+  const body = ticking
+    ? burstQuotaBody(
+      quota.remaining,
+      burstSecondsLeft(quota.retryAfterSeconds ?? 0, quota.receivedAt ?? now, now),
+      quota.burstLimit,
+      quota.burstWindowSeconds,
+    )
+    : quota.body;
+
+  return (
+    <div className="ajev-quota">
+      <div>
+        <strong role="status">{quota.heading}</strong>
+        <span>{body}</span>
+      </div>
+      <button type="button" onClick={() => void openAskJevApiKeySettings()}>
+        Add API key
+      </button>
+    </div>
+  );
+}
 
 export function AskJevPalette({ onClose }: AskJevPaletteProps) {
   const [question, setQuestion] = useState("");
@@ -44,43 +91,81 @@ export function AskJevPalette({ onClose }: AskJevPaletteProps) {
   const [selectedReferenceIds, setSelectedReferenceIds] = useState<string[]>([]);
   const [dragging, setDragging] = useState(false);
   const questionRef = useRef<HTMLInputElement>(null);
+  const newChoiceRef = useRef<HTMLInputElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const documentOperationRef = useRef(false);
   const panelRef = useRef<HTMLElement>(null);
   const previousFocusRef = useRef(
     document.activeElement instanceof HTMLElement ? document.activeElement : null,
   );
+  const keyStateRef = useRef({
+    onClose,
+    addChoice: () => {},
+    removeChoice: (_index: number) => {},
+    newChoice,
+    choiceCount: choices.length,
+  });
 
   useEffect(() => {
     questionRef.current?.focus();
-    const closeOnEscape = (event: globalThis.KeyboardEvent) => {
+    const onKey = (event: globalThis.KeyboardEvent) => {
+      const root = panelRef.current?.getRootNode();
+      const active = root instanceof ShadowRoot ? root.activeElement : document.activeElement;
+      const { onClose: close, addChoice: add, removeChoice: remove, newChoice: draft, choiceCount } =
+        keyStateRef.current;
+
       if (event.key === "Escape") {
         event.preventDefault();
-        onClose();
+        close();
         return;
       }
-      if (event.key !== "Tab" || !panelRef.current) return;
 
-      const focusable = Array.from(
-        panelRef.current.querySelectorAll<HTMLElement>(
-          "button:not(:disabled), input:not(:disabled), [tabindex]:not([tabindex='-1'])",
-        ),
-      ).filter((element) => element.getClientRects().length > 0);
-      if (!focusable.length) return;
-
-      const first = focusable[0];
-      const last = focusable[focusable.length - 1];
-      if (event.shiftKey && document.activeElement === first) {
-        event.preventDefault();
-        last.focus();
-      } else if (!event.shiftKey && document.activeElement === last) {
-        event.preventDefault();
-        first.focus();
+      if (event.key === "Tab" && panelRef.current) {
+        const focusable = Array.from(
+          panelRef.current.querySelectorAll<HTMLElement>(
+            "button:not(:disabled), input:not(:disabled), [tabindex]:not([tabindex='-1'])",
+          ),
+        ).filter((element) => element.getClientRects().length > 0);
+        const first = focusable[0];
+        const last = focusable[focusable.length - 1];
+        if (first && last && event.shiftKey && active === first) {
+          event.preventDefault();
+          last.focus();
+        } else if (first && last && !event.shiftKey && active === last) {
+          event.preventDefault();
+          first.focus();
+        }
+        return;
       }
+
+      if (active === newChoiceRef.current) {
+        if (event.key === "Enter") {
+          event.preventDefault();
+          add();
+          return;
+        }
+        if (event.key === "Backspace" && !draft && choiceCount) {
+          remove(choiceCount - 1);
+          return;
+        }
+      }
+
+      if (
+        event.key === "Enter" &&
+        event.defaultPrevented &&
+        active instanceof HTMLInputElement &&
+        active !== newChoiceRef.current
+      ) {
+        panelRef.current?.querySelector("form")?.requestSubmit();
+        return;
+      }
+
+      if (active instanceof HTMLInputElement) repairPreventedTextEdit(event);
     };
-    window.addEventListener("keydown", closeOnEscape, true);
+    const handlers = askJevKeyHandlers();
+    handlers.add(onKey);
     return () => {
-      window.removeEventListener("keydown", closeOnEscape, true);
+      handlers.delete(onKey);
       previousFocusRef.current?.focus();
     };
   }, [onClose]);
@@ -116,6 +201,7 @@ export function AskJevPalette({ onClose }: AskJevPaletteProps) {
     setNewChoice("");
     resetResponse();
   };
+  keyStateRef.current = { onClose, addChoice, removeChoice, newChoice, choiceCount: choices.length };
 
   const addDocuments = async (files: File[]) => {
     if (documentOperationRef.current) return;
@@ -215,7 +301,11 @@ export function AskJevPalette({ onClose }: AskJevPaletteProps) {
       });
 
       if (response.ok) {
-        setResult({ judgment: response.result, latencyMs: response.latencyMs });
+        setResult({
+          judgment: response.result,
+          latencyMs: response.latencyMs,
+          ...(typeof response.remaining === "number" ? { remaining: response.remaining } : {}),
+        });
       } else {
         setError(presentAskError(response));
       }
@@ -396,6 +486,7 @@ export function AskJevPalette({ onClose }: AskJevPaletteProps) {
             {choices.length < MAX_CHOICES && (
               <div className="ajev-choice aje-add-choice">
                 <input
+                  ref={newChoiceRef}
                   value={newChoice}
                   onChange={(event) => setNewChoice(event.target.value)}
                   onKeyDown={handleNewChoiceKeyDown}
@@ -438,11 +529,19 @@ export function AskJevPalette({ onClose }: AskJevPaletteProps) {
                 <span>Jev</span>
                 <span className="ajev-dot">·</span>
                 <span>{result.latencyMs}ms</span>
+                {typeof result.remaining === "number" ? (
+                  <>
+                    <span className="ajev-dot">·</span>
+                    <span>Free · {result.remaining} left today</span>
+                  </>
+                ) : null}
               </div>
             </div>
           )}
 
-          {error && (
+          {error?.quota ? <QuotaNotice quota={error.quota} /> : null}
+
+          {error && !error.quota && (
             <div className={`ajev-error${error.source === "jev" ? " is-jev" : ""}`} role="alert">
               <div>
                 <strong>{error.label}</strong>
