@@ -269,17 +269,21 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
         get: (key) => chrome.storage.local.get(key),
         set: (items) => chrome.storage.local.set(items),
       });
-      const free = await requestFreeJev(
-        { context, question, choices },
-        settings,
-        { installId, secret: proxyClientSecret() },
-      );
-      return {
-        ok: true,
-        result: free.result,
-        latencyMs: Math.round(performance.now() - startedAt),
-        ...(typeof free.remaining === "number" ? { remaining: free.remaining } : {}),
-      };
+      try {
+        const free = await requestFreeJev(
+          { context, question, choices },
+          settings,
+          { installId, secret: proxyClientSecret() },
+        );
+        return {
+          ok: true,
+          result: free.result,
+          latencyMs: Math.round(performance.now() - startedAt),
+          ...(typeof free.remaining === "number" ? { remaining: free.remaining } : {}),
+        };
+      } finally {
+        void chrome.storage.local.set({ quotaChangedAt: Date.now() });
+      }
     } catch (error) {
       if (error instanceof JevRequestError) {
         return {

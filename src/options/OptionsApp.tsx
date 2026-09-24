@@ -26,6 +26,8 @@ export function OptionsApp() {
   const [quotaState, setQuotaState] = useState<"loading" | "ready" | "error">("loading");
   const [now, setNow] = useState(() => Date.now());
   const quotaReceivedAt = useRef(Date.now());
+  const quotaRequest = useRef(0);
+  const refreshQuotaRef = useRef<() => void>(() => {});
   const [shortcut, setShortcut] = useState<string | null>(null);
   const [shortcutsLinkCopied, setShortcutsLinkCopied] = useState(false);
   const documentInputRef = useRef<HTMLInputElement>(null);
@@ -66,7 +68,11 @@ export function OptionsApp() {
       });
     };
     refreshShortcut();
-    window.addEventListener("focus", refreshShortcut);
+    const refreshOnFocus = () => {
+      refreshShortcut();
+      refreshQuotaRef.current();
+    };
+    window.addEventListener("focus", refreshOnFocus);
 
     const focusApiKey = () => {
       const field = apiKeyRef.current;
@@ -83,21 +89,27 @@ export function OptionsApp() {
     };
     consumeApiKeyIntent();
     const onStorageChanged = (changes: { [key: string]: chrome.storage.StorageChange }, area: string) => {
-      if (area === "local" && changes.settingsIntent?.newValue === "apiKey") consumeApiKeyIntent();
+      if (area !== "local") return;
+      if (changes.settingsIntent?.newValue === "apiKey") consumeApiKeyIntent();
+      if (changes.quotaChangedAt) refreshQuotaRef.current();
     };
     chrome.storage.onChanged.addListener(onStorageChanged);
 
     return () => {
-      window.removeEventListener("focus", refreshShortcut);
+      window.removeEventListener("focus", refreshOnFocus);
       chrome.storage.onChanged.removeListener(onStorageChanged);
     };
   }, []);
 
-  const loadQuota = () => {
-    setQuota(null);
-    setQuotaState("loading");
+  const loadQuota = (mode?: "quiet") => {
+    if (mode !== "quiet") {
+      setQuota(null);
+      setQuotaState("loading");
+    }
+    const request = ++quotaRequest.current;
     void chrome.runtime.sendMessage({ type: "ASK_JEV_QUOTA" })
       .then((response: QuotaStatusResponse) => {
+        if (request !== quotaRequest.current) return;
         if (!response?.ok) {
           setQuotaState("error");
           return;
@@ -107,7 +119,13 @@ export function OptionsApp() {
         setQuota(response.quota);
         setQuotaState("ready");
       })
-      .catch(() => setQuotaState("error"));
+      .catch(() => {
+        if (request === quotaRequest.current) setQuotaState("error");
+      });
+  };
+
+  refreshQuotaRef.current = () => {
+    if (!apiKey.trim()) loadQuota("quiet");
   };
 
   useEffect(() => {
