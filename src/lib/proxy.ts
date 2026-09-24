@@ -83,18 +83,21 @@ export async function requestQuota(options: {
 }): Promise<FreeQuotaSnapshot> {
   const secret = (options.secret ?? proxyClientSecret()).trim();
   if (!secret) throw unavailable();
+  const rawBody = "{}";
   const timestamp = String(options.now?.() ?? Date.now());
-  const signature = await signProxyBody(secret, timestamp, "");
+  const signature = await signProxyBody(secret, timestamp, rawBody);
   const fetcher = options.fetcher ?? fetch;
   let response: Response;
   try {
     response = await fetcher(`${options.proxyUrl ?? proxyUrl()}/api/quota`, {
-      method: "GET",
+      method: "POST",
       headers: {
+        "content-type": "application/json",
         "x-ask-jev-timestamp": timestamp,
         "x-ask-jev-signature": signature,
         "x-ask-jev-install": options.installId,
       },
+      body: rawBody,
     });
   } catch {
     throw unavailable();
