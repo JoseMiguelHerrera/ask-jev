@@ -1,7 +1,7 @@
 {
   "manifest_version": 3,
-  "name": "Ask Jev",
-  "description": "Ask fast probabilistic questions about the page you are viewing.",
+  "name": "Ask Jev: ask any webpage a question",
+  "description": "Ask any webpage and/or PDF a question and get a probability for each answer. Free, no API key needed.",
   "version": "0.3.0",
   "minimum_chrome_version": "119",
   "permissions": ["activeTab", "scripting", "storage"],

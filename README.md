@@ -2,6 +2,8 @@
 
 A keyboard-first Chrome extension for asking probabilistic questions about the current webpage with TypeSafe's Jev model.
 
+**[Install Ask Jev from the Chrome Web Store](https://chromewebstore.google.com/detail/ask-jev/hhoafjjgfhcbiobmmgmaoonllkgmdmgj)**
+
 ## Configure Jev
 
 A personal TypeSafe key is never included in the build. Leave the key blank to use this install's free questions each UTC day. Those questions go through the Ask Jev proxy. Settings shows how many are left. A saved key is unlimited and is sent only to `https://api.typesafe.ai`.
